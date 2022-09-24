@@ -1,14 +1,14 @@
 ﻿# -*- coding: utf-8 -*-
 # main import's 
-import sys, os, re
-import xbmc, xbmcaddon, xbmcgui
+import sys, os
+import xbmc, xbmcaddon, xbmcgui, xbmcvfs
 from xml.dom import minidom
 
 # Script constants 
 __addon__     = xbmcaddon.Addon()
 __addonname__ = __addon__.getAddonInfo('name')
-__cwd__       = xbmc.translatePath(__addon__.getAddonInfo('path')).decode("utf-8")
-__profile__   = xbmc.translatePath(__addon__.getAddonInfo('profile')).decode("utf-8")
+__cwd__       = xbmcvfs.translatePath(__addon__.getAddonInfo('path'))
+__profile__   = xbmcvfs.translatePath(__addon__.getAddonInfo('profile'))
 __language__  = __addon__.getLocalizedString
 
 # Shared resources
@@ -23,7 +23,6 @@ def fixed_writexml(self, writer, indent="", addindent="", newl=""):
 
     attrs = self._get_attributes()
     a_names = attrs.keys()
-    a_names.sort()
 
     for a_name in a_names:
         writer.write(" %s=\"" % a_name)
@@ -57,48 +56,88 @@ def getres(addonid):
             ress = item.getElementsByTagName('res')
             list = []
             for res in ress:
-                list.append(res.getAttribute('folder'))
+                if res.getAttribute('folder') not in list:
+                    list.append(res.getAttribute('folder'))
             return list
     return []
 
 def addfont(addonid, folder):
+    fonts_path = os.path.join(__profile__, 'fonts')
+    font_list = ['arial.ttf']
+    if os.path.exists(fonts_path):
+        for f in os.listdir(fonts_path):
+            if os.path.isfile(os.path.join(fonts_path, f)) and f.endswith('.ttf'):
+                font_list.append(f)
+    font_list.append('[COLOR red]选择本地字体文件[/COLOR]')
+    sel = xbmcgui.Dialog().select('请选择要使用的字体文件', font_list)
+    src = ''
+    if sel < 0:
+        return
+    elif sel == 0:
+        font_name = 'arial'
+    elif sel == len(font_list) - 1:
+        src = xbmcgui.Dialog().browseSingle(1, '选择字体文件', 'files', '.ttf', False, False)
+        if not src:
+            return
+        font_name = os.path.basename(src)[:-4]
+    else:
+        src = os.path.join(fonts_path, font_list[sel])
+        font_name = font_list[sel][:-4]
+    if sel > 0:
+        dst_path = os.path.join(os.path.dirname(
+            os.path.dirname(__cwd__)), addonid, 'fonts')
+        dst = os.path.join(dst_path, font_name + '.ttf')
+        if not os.path.exists(dst_path):
+            xbmcgui.Dialog().notification('字体复制出错', '字体文件夹不存在', xbmcgui.NOTIFICATION_INFO, 1000, False)
+            return
+
+        if not os.path.exists(dst) and not xbmcvfs.copy(src, dst):
+            xbmcgui.Dialog().notification('字体复制出错', '复制失败', xbmcgui.NOTIFICATION_INFO, 1000, False)
+            return
+
+        if not os.path.exists(fonts_path):
+            xbmcvfs.mkdir(fonts_path)
+        if os.path.exists(fonts_path):
+            xbmcvfs.copy(src, os.path.join(fonts_path, font_name + '.ttf'))
+
     filepath = os.path.join(addonspath, addonid, folder, 'Font.xml')
     doc = minidom.parse(filepath)
     root = doc.documentElement
     fontsets = root.getElementsByTagName('fontset')
     list = []
-    arial_pos = None
+    font_pos = None
     for i in range(0,len(fontsets)):
         id = fontsets[i].getAttribute('id')
-        if id.lower() == 'arial':
-            ret = xbmcgui.Dialog().yesno('Skin Font', 'Arial皮肤字体已存在。', '要重新生成Arial字体吗？')
+        if id.lower() == font_name.lower():
+            ret = xbmcgui.Dialog().yesno('Skin Font',  font_name + '皮肤字体已存在。要重新生成Arial字体吗？', '否', '是')
             if not ret:
                 return
-            arial_pos = i
+            font_pos = i
         list.append(id)
-    sel = xbmcgui.Dialog().select('请选择参照字体(%s)' % (folder.encode('utf-8')), list)
+    sel = xbmcgui.Dialog().select('请选择参照字体(%s)' % (folder), list)
     if sel < 0:
         return
-    arial = fontsets[sel].cloneNode(True)
-    arial.setAttribute("id","Arial")
-    if arial.getAttribute("idloc") and sel != arial_pos:
-        arial.removeAttribute("idloc")
-    for node in arial.getElementsByTagName("filename"):
-        newText = doc.createTextNode("arial.ttf")
+    font_node = fontsets[sel].cloneNode(True)
+    if font_pos:
+        font_node.setAttribute("id", fontsets[font_pos].getAttribute("id"))
+        root.removeChild(fontsets[font_pos])
+        del fontsets[font_pos]
+    else:
+        font_node.setAttribute("id", font_name)
+    if font_node.getAttribute("idloc") and sel != font_pos:
+        font_node.removeAttribute("idloc")
+    for node in font_node.getElementsByTagName("filename"):
+        newText = doc.createTextNode(font_name + '.ttf')
         node.replaceChild(newText, node.firstChild)
-    if arial_pos:
-        root.removeChild(fontsets[arial_pos])
-        del fontsets[arial_pos]
-    root.appendChild(arial)
-    f = open(filepath, 'w')
-    doc.writexml(f, addindent="    ", newl="\n")
-    f.close()
-    xbmc.executebuiltin('Notification(%s,%s,%s)' % (__addonname__, 'Arial皮肤字体已生成(%s)' % (folder.encode('utf-8')), "1000")) 
+    root.appendChild(font_node)
+    with open(filepath, 'w', encoding='utf-8') as f:
+        doc.writexml(f, addindent="    ", newl="\n")
+    xbmcgui.Dialog().notification(addonid, font_name + '皮肤字体已生成', xbmcgui.NOTIFICATION_INFO, 1000, False)
+addonspath = os.path.dirname(os.path.dirname(__cwd__))
 
-addonspath = os.path.dirname(__cwd__)
 addonlist = []
 for addonid in os.listdir(addonspath):
-    if addonid[:4] == 'skin':
+    if os.path.isdir(os.path.join(addonspath, addonid)) and addonid[:4] == 'skin':
         addon = xbmcaddon.Addon(id=addonid)
         addonname = addon.getAddonInfo('name')
         addonlist.append((addonid, addonname))

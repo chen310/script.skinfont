@@ -1,0 +1,34 @@
+name: "upload"
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - master
+
+concurrency:
+  group: upload-workflow
+  cancel-in-progress: true
+
+jobs:
+  upload-files:
+    name: upload
+    runs-on: ubuntu-latest
+    steps:
+      - name: Clone local repository
+        uses: actions/checkout@v2
+      - name: Get version
+        run: |
+          ver=$(cat addon.xml | grep provider-name | grep -o "[0-9]\{1,\}\.[\.0-9]*")
+          echo "VERSION=$ver" >> $GITHUB_ENV
+      - name: Move files
+        run: |
+          mkdir script.skinfont
+          rm -rf .github .git .gitignore
+          shopt -s extglob
+          mv !(script.skinfont) script.skinfont
+      - name: Upload addon
+        uses: actions/upload-artifact@v2
+        with:
+          name: script.skinfont-${{ env.VERSION }}-python3
+          path: ./
